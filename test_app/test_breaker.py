@@ -6,11 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 def make_request():
     try:
         # Add a random delay between 0.1 and 0.5 seconds before each request
-        time.sleep(random.uniform(1, 2))
-        
         response = requests.get("http://127.0.0.1:8000/users/")
         print(response.text)
-        
         # Add a delay after each request if needed
         time.sleep(random.uniform(1, 2))
         
