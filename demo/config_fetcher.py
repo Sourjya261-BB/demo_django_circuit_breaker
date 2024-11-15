@@ -143,7 +143,7 @@ DATABASES = {
         'USER': 'postgres',
         'PASSWORD': '1234',
         'HOST': 'localhost',
-        'PORT': '5000',
+        'PORT': '5432',
     }
 }
 service_tenant_settings  = {
@@ -166,7 +166,7 @@ def update_db_config_for_tenant(tenant_id, tenant_config=None):
             'USER': 'postgres',
             'PASSWORD': '1234',
             'HOST': 'localhost',
-            'PORT': '5432',
+            'PORT': '5000',
         }
     else:
         tenant_config=tenant_config
