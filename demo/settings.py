@@ -37,7 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'test_app'
+    'test_app',
+    'demo'
 ]
 
 MIDDLEWARE = [
@@ -74,6 +75,7 @@ WSGI_APPLICATION = 'demo.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+"""remove databases from settings.py so that it can be externally managed by connection_manager.py"""
 # DATABASES = {
 #         'default': {
 #         'ENGINE': 'django.db.backends.postgresql',
@@ -84,7 +86,6 @@ WSGI_APPLICATION = 'demo.wsgi.application'
 #         'PORT': '5432',
 #     }
 # }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators

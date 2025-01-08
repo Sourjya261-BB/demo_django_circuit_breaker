@@ -1,10 +1,6 @@
-# from bb_python_django_common.middleware.threadlocals import get_x_tenant_id
-# from .connection_manager import ConnectionManager
-# from .config_fetcher import DATABASES
 from mysql.connector.pooling import MySQLConnectionPool
 from psycopg2_pool import ConnectionPool
-from .circuit_breaker import circuit
-from .connection_manager import MyCircuitBreaker, is_connection_error_or_request_exception
+from demo.circuit_breaker.aggregator_circuit_breaker import CircuitBreakerError
 
 DEFAULT_PK_QUERY = "select id from %s where %s = %s;"
 def get_x_tenant_id():
@@ -14,17 +10,12 @@ class GenericDBUtils:
     def __init__(self, db_type="default", tenant_id=None,connection_manager=None):
         self.tenant_id = tenant_id or get_x_tenant_id()
         self.db_name = f"{self.tenant_id}-{db_type}"
-        # self.db_name = "postgres"
-
-        # Initialize ConnectionManager and get the connection pool and circuit breaker
-        # self.connection_manager = ConnectionManager(DATABASES)
-        # self.pool, self.circuit_breaker = self.connection_manager.get_connection_with_circuit(self.db_name)
         self.connection_manager = connection_manager
         if self.connection_manager:
             self.pool, self.circuit_breaker = self.connection_manager.get_connection_with_circuit(self.db_name)
         else:
             # This will only be used if the global connection_manager instance is not provided.
-            from .connection_manager import ConnectionManager  # Lazy import to avoid app dependency
+            from .connection_manager import ConnectionManager
             from .config_fetcher import DATABASES
             self.connection_manager = ConnectionManager(DATABASES)
             self.pool, self.circuit_breaker = self.connection_manager.get_connection_with_circuit(self.db_name)
@@ -69,19 +60,15 @@ class GenericDBUtils:
                 raise e
 
         try:
-            # Check if the circuit is open; if so, attempt to refresh the connection pool
-            print(f"Open till:{self.circuit_breaker.open_remaining},Failure Count:{self.circuit_breaker.failure_count},State:{self.circuit_breaker.state}")
-            print(f"id before refresh:{id(self.circuit_breaker)}")
-            if self.circuit_breaker and self.circuit_breaker.state == "open":
-                # print(f"Open till:{self.circuit_breaker.open_remaining},Failure Count:{self.circuit_breaker.failure_count}")
-                print("Circuit breaker is open, refreshing connection pool...")
-                if self.connection_manager.refresh_pool(self.db_name):
-                    self.pool, _ = self.connection_manager.get_connection_with_circuit(self.db_name)
-                    print(f"id after refresh:{id(self.circuit_breaker)}")
-
-            # Execute the query within the circuit breaker context
+            print(f"--|Current_State: {self.circuit_breaker.current_state}, Failure_count: {self.circuit_breaker.fail_counter},Fail_Max: {self.circuit_breaker.fail_max}|--")
+            if self.circuit_breaker.metadata.get("refresh_pool"):
+                print(f"Pool was refreshed for {self.db_name} during execution....")
+                self.circuit_breaker.metadata["refresh_pool"] = False
+                self.pool, _ = self.connection_manager.get_connection_with_circuit(self.db_name)
             connection, cursor = self.circuit_breaker.call(_execute)
             return connection, cursor
+        except CircuitBreakerError as e:
+            raise ConnectionError(f"Circuit breaker prevented execution: {e}")
         except Exception as e:
             raise ConnectionError(f"Error executing raw query: {e}")
 

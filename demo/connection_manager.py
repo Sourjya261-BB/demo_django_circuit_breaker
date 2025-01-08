@@ -1,37 +1,45 @@
-from functools import wraps
-# from circuitbreaker import CircuitBreaker, CircuitBreakerError, STATE_HALF_OPEN, STATE_OPEN
-from .circuit_breaker import CircuitBreaker
+from demo.circuit_breaker.aggregator_circuit_breaker import CircuitBreaker,CircuitBreakerListener
 from mysql.connector import pooling
 from psycopg2_pool import ConnectionPool
-from requests.exceptions import RequestException
 from mysql.connector.errors import DatabaseError, OperationalError, InterfaceError, ProgrammingError
 from psycopg2 import OperationalError as Psycopg2OperationalError, InterfaceError as Psycopg2InterfaceError, DatabaseError as Psycopg2DatabaseError
 from .config_fetcher import update_db_config_for_tenant
 
-# Custom function to handle multiple exceptions for both MySQL and PostgreSQL
-def is_connection_error_or_request_exception(thrown_type, thrown_value):
-    # Handle RequestException from requests library
-    if isinstance(thrown_value, RequestException):
-        return True
-    # Handle MySQL errors
-    if isinstance(thrown_value, (DatabaseError, OperationalError, InterfaceError, ProgrammingError)):
-        return True
-    # Handle PostgreSQL errors
-    if isinstance(thrown_value, (Psycopg2OperationalError, Psycopg2InterfaceError, Psycopg2DatabaseError)):
-        return True
-    # Handle ConnectionError
-    if isinstance(thrown_value, ConnectionError):
-        return True
-    # Return False if not one of the above
-    return False
+included_exceptions = [DatabaseError, OperationalError, InterfaceError, ProgrammingError,Psycopg2OperationalError, Psycopg2InterfaceError, Psycopg2DatabaseError]
 
-# CircuitBreaker with the custom exception handler for both MySQL and PostgreSQL errors
+class Listener(CircuitBreakerListener):
+    def __init__(self, connection_manager, db_name, metadata):
+        """
+        Listener to handle state changes and update metadata on pool refresh.
+        """
+        self.connection_manager = connection_manager
+        self.db_name = db_name
+        self.metadata = metadata  # Shared state for communication
+
+    def state_change(self, cb, old_state, new_state):
+        """
+        Detects state transitions and refreshes connection pool when moving from CLOSED to OPEN.
+        """
+        print(f"[Listener] Circuit Breaker for {self.db_name} transitioned from {old_state.name} to {new_state.name}")
+        if old_state.name == "closed" and new_state.name == "open":
+            # print(f"[Listener] Circuit Breaker for {self.db_name} transitioned to OPEN from CLOSED")
+            if self.connection_manager.refresh_pool(self.db_name):
+                print(f"[Listener] Connection pool for {self.db_name} refreshed.")
+                self.metadata["refresh_pool"] = True
+            else:
+                print(f"[Listener] Failed to refresh connection pool for {self.db_name}.")
+                self.metadata["refresh_pool"] = False
+
+
 class MyCircuitBreaker(CircuitBreaker):
-    def __init__(self, failure_threshold, recovery_timeout):
+    def __init__(self, name, failure_threshold, recovery_timeout,connection_manager,db_name):
+        self.metadata = {"refresh_pool": False}
         super().__init__(
-            failure_threshold=failure_threshold,
-            recovery_timeout=recovery_timeout,
-            expected_exception=is_connection_error_or_request_exception  # Use the custom exception handler
+            name = name,
+            fail_max=failure_threshold,
+            reset_timeout=recovery_timeout,
+            include=included_exceptions ,
+            listeners=[Listener(connection_manager,db_name,self.metadata)]
         )
 
 # breaker  = MyCircuitBreaker(failure_threshold=10,recovery_timeout=30)
@@ -57,7 +65,7 @@ class ConnectionManager:
     def _initialize_connection(self, db_name, config):
         db_engine = config['ENGINE']
         failure_threshold = config.get('FAILURE_THRESHOLD', 10)
-        recovery_timeout = config.get('RECOVERY_TIMEOUT', 30)
+        recovery_timeout = config.get('RECOVERY_TIMEOUT', 20)
 
         # If we already have a circuit breaker for this connection, preserve its state
         existing_circuit_breaker = None
@@ -67,8 +75,11 @@ class ConnectionManager:
         # Only create a new circuit breaker if we don't have an existing one
         if existing_circuit_breaker is None:
             circuit_breaker = MyCircuitBreaker(
+                name = f"{db_name}",
                 failure_threshold=failure_threshold,
-                recovery_timeout=recovery_timeout
+                recovery_timeout=recovery_timeout,
+                connection_manager=self,
+                db_name=db_name
             )
         else:
             circuit_breaker = existing_circuit_breaker
@@ -128,7 +139,7 @@ class ConnectionManager:
             raise ValueError(f"Connection pool for {db_name} not initialized.")
 
         connection_data = self.connections[db_name]
-        print(f"Providing Connection from pool {db_name}")
+        # print(f"Providing Connection from pool {db_name}")
         return connection_data["pool"], connection_data["circuit_breaker"]
 
     def release_connection(self, db_name, conn):
@@ -139,7 +150,7 @@ class ConnectionManager:
             pool = self.connections[db_name]["pool"]
             # Release connection back to the pool based on its type
             if isinstance(pool, pooling.MySQLConnectionPool):
-                print(f"release connection with address {conn.address} to pool {db_name}")
+                # print(f"release connection with address {conn.address} to pool {db_name}")
                 conn.close()  # For MySQL, close releases it back to the pool
             elif isinstance(pool, ConnectionPool):
                 pool.putconn(conn)
@@ -171,6 +182,6 @@ class ConnectionManager:
                 self._initialize_connection(db_name, updated_config)
                 return True
             except Exception as e:
-                print(f"Failed to refresh pool for {db_name}: {e}")
+                # print(f"Failed to refresh pool for {db_name}: {e}")
                 return False
         return False

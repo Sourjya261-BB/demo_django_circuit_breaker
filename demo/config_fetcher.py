@@ -136,6 +136,12 @@
 #             SECRET_MAPS[tenant_id] = db_secrets
 # #-----------------------------------------------------------------
 ## -----------For testing-------------------------------------------
+""" Set up the two postgres instances using docker, one exposed to port 5000 and the other 5432. on the first instance
+create a table test_app_user.
+The objective here is to initialize the the connection pool for the first db and then query the table test_app_user. As the table
+ does not exist on the first instance the execution of the query would throw an error. Upon braching the failure threshold the cb will open
+ and trigger a db pool refresh during which it would update the config. The code here has been set up so that the updated config points to
+ the db instance with the table test_app_user present in it (i.e the second one)"""
 DATABASES = {
         '1-default': {
         'ENGINE': 'django.db.backends.postgresql',
